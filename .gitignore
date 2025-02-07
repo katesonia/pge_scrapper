@@ -1,6 +1,7 @@
 .env
 images/
 node_modules/
+puppeteer_cache/
 billings.csv
 eng.traineddata
 *.pdf

@@ -1,147 +1,249 @@
-const puppeteer = require('puppeteer');
-const dotenv = require('dotenv');
-const { setTimeout } = require('timers/promises');
-const minimist = require('minimist');
-const fs = require('fs');
+const puppeteer = require("puppeteer-extra");
+const StealthPlugin = require("puppeteer-extra-plugin-stealth");
+const dotenv = require("dotenv");
+const { setTimeout } = require("timers/promises");
+const minimist = require("minimist");
+const fs = require("fs");
+const path = require("path");
+const os = require("os");
+
 dotenv.config();
+puppeteer.use(StealthPlugin());
+
+const ARGS = loadArgs();
+const N_RETRY = 2;
+
+function loadArgs() {
+  const args = minimist(process.argv.slice(2));
+  if (args.last_n_months > 24) args.last_n_months = 24;
+  if (args.headless == null) args.headless = true;
+  if (args.username && args.password && args.url) {
+    fs.writeFileSync(
+      ".env",
+      `USERNAME="${encodeBase64(args.username)}"\n` +
+        `PASSWORD="${encodeBase64(args.password)}"\n` +
+        `URL="${args.url}"\n` +
+        `LAST_N_MONTHS=${args.last_n_months || 24}\n` +
+        `HEADLESS=${args.headless}`
+    );
+  }
+
+  const parsed_args = {
+    username: decodeBase64(process.env.USERNAME),
+    password: decodeBase64(process.env.PASSWORD),
+    url: process.env.URL,
+    last_n_months: parseInt(process.env.LAST_N_MONTHS),
+    headless: process.env.HEADLESS === "true",
+  };
+  console.log("Args:", parsed_args);
+  return parsed_args;
+}
 
 function encodeBase64(str) {
-  return Buffer.from(str).toString('base64');
+  return Buffer.from(str).toString("base64");
 }
 
 function decodeBase64(str) {
-  return Buffer.from(str, 'base64').toString('utf8');
-}
-
-function cacheUsernameAndPassword(username, password) {
-  if (username && password) {
-    fs.writeFileSync(
-        '.env',
-        `YOUR_USERNAME=${encodeBase64(username)}\nYOUR_PASSWORD=${encodeBase64(password)}`
-    );
-  }
-}
-
-function getUsernameAndPassword() {
-  const args = minimist(process.argv.slice(2));
-  if (args.username && args.password) {
-    cacheUsernameAndPassword(args.username, args.password);
-    return { username: args.username, password: args.password };
-  }
-  const username = decodeBase64(process.env.YOUR_USERNAME);
-  const password = decodeBase64(process.env.YOUR_PASSWORD);
-  return { username, password };
+  return Buffer.from(str, "base64").toString("utf8");
 }
 
 function getDownloadFileName(date) {
-    const mm = String(date.getMonth() + 1).padStart(2, '0'); // Months are 0-based
-    const dd = String(date.getDate()).padStart(2, '0');
-    const yyyy = date.getFullYear();
-    
-    const formattedDate = `${mm}${dd}${yyyy}`;
-    return `6491custbill${formattedDate}.pdf`;
+  const mm = String(date.getUTCMonth() + 1).padStart(2, "0"); // Months are 0-based
+  const dd = String(date.getUTCDate()).padStart(2, "0");
+  const yyyy = date.getUTCFullYear();
+
+  const formattedDate = `${mm}${dd}${yyyy}`;
+  return `6491custbill${formattedDate}.pdf`;
 }
 
-(async () => {
-  // 1. Launch Browser
-  //    Set headless to false if you want to see the browser for debugging
-  const browser = await puppeteer.launch({ headless: false });
-  const page = await browser.newPage();
-  
+function fileExists(fileName) {
+  const filePath = path.join(os.homedir(), "Downloads", fileName);
+  return fs.existsSync(filePath);
+}
+
+async function handleCookieConsent(page) {
   try {
-    // 2. Go to Login Page
-    //    Replace this with PG&E’s actual login page URL
-    await page.goto('https://m.pge.com/#login', { waitUntil: 'networkidle2' });
+    console.log("Waiting for cookie consent window");
+    const rejectButton = await page.waitForSelector(
+      "#onetrust-reject-all-handler",
+      { visible: true, timeout: 3000 }
+    );
 
-    // await logShadowHosts(page);
-    // await clickRejectCookiesInShadowDom(page);
-    const rejectButton = await page.waitForSelector('#onetrust-reject-all-handler', { visible: true });
-    await rejectButton.click();
+    if (rejectButton) {
+      await rejectButton.click();
+      // The cookie consent window is blocking the login button, need to wait for it to be hidden
+      await page.waitForSelector("#onetrust-reject-all-handler", {
+        hidden: true,
+      });
+    }
+  } catch (err) {
+    console.log("No cookie consent window found");
+  }
+}
 
-    // 3. Fill in username and password
-    //    NOTE: The below selectors (#username, #password, #loginBtn) are just EXAMPLES!
-    //    You will need to inspect PG&E’s login form in DevTools to find the correct selectors.
-    const { username, password } = getUsernameAndPassword();
-    await page.type('#usernameField', username);
-    await page.type('#passwordField', password);
+async function loginAndRedirect(page, url) {
+  try {
+    await handleCookieConsent(page);
+    // Go to Login Page
+    console.log(`Initial navigation to ${url}`);
+    await page.goto(url, { waitUntil: "networkidle2" });
+    await setTimeout(1000);
 
-    // The cookie consent window is blocking the login button, need to wait for it to be hidden
-    await page.waitForSelector('#onetrust-reject-all-handler', { hidden: true });
+    // Check if redirected to login page
+    if (page.url().includes("login")) {
+      console.log("Redirected to login page, please check your credentials");
+      const loggedIn = await page.$(".pge_coc-header-siginedin_gp");
+      if (loggedIn) {
+        console.log("Already logged in");
+      } else {
+        console.log("Filling in username and password");
+        // Fill in username and password
+        await page.type("#usernameField", ARGS.username);
+        await page.type("#passwordField", ARGS.password);
+        const loginButton = await page.waitForSelector("#home_login_submit", {
+          visible: true,
+        });
 
-    const loginButton = await page.waitForSelector('#home_login_submit', { visible: true });
-    await loginButton.click();
+        await setTimeout(3000);
+        await loginButton.click();
 
-    // 4. Wait for post-login navigation (PG&E may redirect or show a 2FA page, etc.)
-    await page.waitForNavigation({ waitUntil: 'networkidle2' });
-    
-    // 5. Navigate to the Billing History page
-    //    (the URL you gave, or possibly a link from the account dashboard)
-    await page.goto('https://m.pge.com/#myaccount/billing/history/4947606491-7', { waitUntil: 'networkidle2' });
-
+        // Wait for post-login navigation (PG&E may redirect or show a 2FA page, etc.)
+        await page.waitForNavigation({ waitUntil: "networkidle2" });
+      }
+    }
+    // Navigate to the Billing History page
+    console.log(`After handling login, navigating to ${url}`);
+    await page.goto(url, { waitUntil: "networkidle2" });
     // 6. Wait for the bill entries to load
-    //    Adjust the selector to something that definitely appears once bills are loaded:
-    //    e.g., a table row or the "View up to 24 months of activity" link text
-    const view24MonthBillsButton = await page.waitForSelector('#href-view-24month-history', { visible: true, timeout: 8000 });
+    const view24MonthBillsButton = await page.waitForSelector(
+      "#href-view-24month-history",
+      { visible: true, timeout: 3000 }
+    );
     // 7. Click on the "View up to 24 months of activity" link
     await view24MonthBillsButton.click();
+    return true;
+  } catch (err) {
+    console.log("failed log in");
+    return false;
+  }
+}
 
-    await page.waitForSelector('tbody.desktop-pdpore-table.account-list-tbody.scrollTable');
-
-    let idx = 0;
-    let fileNames = [];
-
-    const args = minimist(process.argv.slice(2));
-    let limit = Number.MAX_SAFE_INTEGER;
-    if (args.limit) {
-      limit = parseInt(args.limit);
+async function loginAndRedirectWithRetry(page, url, n_retry) {
+  for (let i = 0; i < n_retry; i++) {
+    const loggedIn = await loginAndRedirect(page, url);
+    if (loggedIn) {
+      console.log("Successfully logged in");
+      return true;
     }
-    
-    while (true) {
-      // Get fresh row reference using XPath index
-      const rows = await page.$$(
-        '::-p-xpath(//tr[contains(@class, "billed_history_panel")][.//span[contains(text(), "Bill Charges")]])'
-      );
+    console.log("Failed to log in, refreshing page and retrying...");
+    await page.reload({ waitUntil: "networkidle2" });
+  }
 
-      if (idx >= Math.min(rows.length, limit)) {
-        console.log('No more rows to process, total downloaded files: ', fileNames.length);
-        break;
+  console.log("Failed to log in after", n_retry, "retries");
+  return false;
+}
+
+async function clickAndDownloadBills(page, limit) {
+  let fileNames = [];
+  try {
+    for (let idx = 1; idx <= limit; idx++) {
+      // Get fresh row reference using XPath index
+      const row = await page.$(
+        `::-p-xpath((//tr[contains(@class, "billed_history_panel")][.//span[contains(text(), "Bill Charges")]])[${idx}])`
+      );
+      if (!row) {
+        console.log(`No row found for index ${idx}, skipping...`);
+        continue;
       }
 
-      const row = rows[idx];
-
+      console.log(`Processing row ${idx}\n`);
       try {
-        await row.evaluate(el => el.scrollIntoView({ behavior: "smooth", block: "start" }));
+        await row.evaluate((el) =>
+          el.scrollIntoView({ behavior: "smooth", block: "start" })
+        );
         await setTimeout(1000);
 
-        const viewBillLink = await row.$('a[title="view bill pdf"]', {visible: true});
-        if (viewBillLink) {
+        const viewBillLinks = await row.$$('a[title="view bill pdf"]', {
+          visible: true,
+        });
+        for (const viewBillLink of viewBillLinks) {
+          try {
             // Extract the data-date attribute value from the anchor element.
-            const billTimestamp = await viewBillLink.evaluate(el => el.getAttribute('data-date'));
-  
-            // Convert the timestamp string to a number.
-            const timestampNumber = parseInt(billTimestamp, 10);
-            
+            const billTimestamp = await viewBillLink.evaluate((el) =>
+              el.getAttribute("data-date")
+            );
             // Convert the millisecond timestamp into a Date object
-            const billDate = new Date(timestampNumber);
-            
+            const billDate = new Date(parseInt(billTimestamp, 10));
+            const fileName = getDownloadFileName(billDate);
+            if (fileExists(fileName)) {
+              console.log(
+                `File ${fileName} already exists, loading from local file, skip downloading...`
+              );
+              fileNames.push(fileName);
+              continue;
+            }
+
             await viewBillLink.click();
             await setTimeout(8000); // Wait for PDF download or navigation
-            console.log('Bill Date:', billDate);
-            console.log(`Clicked and successfully downloaded ${idx} file`);
-            fileNames.push(getDownloadFileName(billDate));
-            idx++;
+            console.log("Bill Date:", billDate);
+            console.log(`Clicked and successfully downloaded ${fileName}`);
+            fileNames.push(fileName);
+          } catch (err) {
+            console.log(`Skip to the next clickable element: ${err}`);
+          }
         }
       } catch (err) {
         console.log(`Skipping ${idx} row due to error: ${err.message}`);
-        idx++;
       }
     }
+  } catch (err) {
+    console.error("Error clicking and downloading bills:", err);
+  }
+  return fileNames;
+}
 
-    console.log(fileNames);
+async function scrape() {
+  // 1. Launch Browser
+  const browser = await puppeteer.launch({
+    headless: ARGS.headless,
+    userDataDir: "./puppeteer_cache",
+  });
+  const page = await browser.newPage();
+  await page.setUserAgent(
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
+  );
 
+  // login
+  if (!(await loginAndRedirectWithRetry(page, ARGS.url, N_RETRY))) {
+    return false;
+  }
+
+  try {
+    // 8. Wait for the 24 month bills to load
+    await page.waitForSelector(
+      "tbody.desktop-pdpore-table.account-list-tbody.scrollTable"
+    );
+
+    let limit = ARGS.last_n_months;
+    console.log(`Getting the last ${limit} months of bills`);
+    const fileNames = await clickAndDownloadBills(page, limit);
+
+    console.log("Downloaded files:\n", fileNames);
   } catch (error) {
-    console.error('Error scraping PG&E bills:', error);
+    console.error("Error scraping PG&E bills:", error);
+    return false;
   } finally {
     await browser.close();
+    return true;
   }
-})();
+}
+
+async function main() {
+  const success = await scrape();
+  if (!success) {
+    console.log("Failed to scrape PG&E bills");
+    process.exit(1);
+  }
+}
+
+main();
