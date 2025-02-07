@@ -35,7 +35,6 @@ function loadArgs() {
     last_n_months: parseInt(process.env.LAST_N_MONTHS),
     headless: process.env.HEADLESS === "true",
   };
-  console.log("Args:", parsed_args);
   return parsed_args;
 }
 
