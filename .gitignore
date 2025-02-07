@@ -1,4 +1,5 @@
 .env
 images/
 node_modules/
+billings.csv
 eng.traineddata
