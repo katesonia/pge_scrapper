@@ -4,8 +4,7 @@ const fs = require('fs').promises;
 const { exec } = require('child_process');
 const util = require('util');
 const execPromise = util.promisify(exec);
-// const pdf = require('pdf-parse');
-// const PDFParser = require("pdf2json");
+
 
 async function pdfToImage(pdfPath, outputPath, pageNumber = 1) {
     try {

@@ -91,10 +91,9 @@ function getDownloadFileName(date) {
     let fileNames = [];
 
     const args = minimist(process.argv.slice(2));
+    let limit = Number.MAX_SAFE_INTEGER;
     if (args.limit) {
       limit = parseInt(args.limit);
-    } else {
-      limit = Number.MAX_SAFE_INTEGER;
     }
     
     while (true) {
@@ -115,7 +114,6 @@ function getDownloadFileName(date) {
         await setTimeout(1000);
 
         const viewBillLink = await row.$('a[title="view bill pdf"]', {visible: true});
-        console.log(viewBillLink);
         if (viewBillLink) {
             // Extract the data-date attribute value from the anchor element.
             const billTimestamp = await viewBillLink.evaluate(el => el.getAttribute('data-date'));
@@ -126,10 +124,10 @@ function getDownloadFileName(date) {
             // Convert the millisecond timestamp into a Date object
             const billDate = new Date(timestampNumber);
             
-            console.log('Bill Date:', billDate);
             await viewBillLink.click();
             await setTimeout(8000); // Wait for PDF download or navigation
-            console.log(`Clicked and successfully downloaded ${idx} row`);
+            console.log('Bill Date:', billDate);
+            console.log(`Clicked and successfully downloaded ${idx} file`);
             fileNames.push(getDownloadFileName(billDate));
             idx++;
         }
