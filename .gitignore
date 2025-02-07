@@ -3,3 +3,9 @@ images/
 node_modules/
 billings.csv
 eng.traineddata
+*.pdf
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
