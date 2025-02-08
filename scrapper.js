@@ -20,8 +20,8 @@ function loadArgs() {
   if (args.username && args.password && args.url) {
     fs.writeFileSync(
       ".env",
-      `USERNAME="${encodeBase64(args.username)}"\n` +
-        `PASSWORD="${encodeBase64(args.password)}"\n` +
+      `USERNAME="${encodeBase64(String(args.username))}"\n` +
+        `PASSWORD="${encodeBase64(String(args.password))}"\n` +
         `URL="${args.url}"\n` +
         `LAST_N_MONTHS=${args.last_n_months || 24}`
     );

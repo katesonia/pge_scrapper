@@ -28,6 +28,12 @@ Command to run the scrapper:
 node scrapper.js --url <url_to_pge_billings> --username <your_username> --password <your_password> --last_n_months <last_n_months_to_download>
 ```
 
+Example:
+
+```bash
+node scrapper.js --url https://m.pge.com/#myaccount/billing/history/1234 --username user1@gmail.com --password abc12345 --last_n_months 3
+```
+
 Arguments:
 
 - username: Your username for PG&E
