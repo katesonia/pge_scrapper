@@ -13,6 +13,12 @@ Download the repo:
 cd ~/Downloads/pge_scrapper-main
 ```
 
+If you haven't installed brew, run the following command to install it. [instruction](https://phoenixnap.com/kb/install-npm-mac)
+
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+
 If you haven't install node, run the following command to install it:
 
 ```bash
