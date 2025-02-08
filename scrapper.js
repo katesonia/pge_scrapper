@@ -6,6 +6,7 @@ const minimist = require("minimist");
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
+const { parsePgeBillingFiles } = require("./pdfparser");
 
 dotenv.config();
 puppeteer.use(StealthPlugin());
@@ -16,15 +17,13 @@ const N_RETRY = 2;
 function loadArgs() {
   const args = minimist(process.argv.slice(2));
   if (args.last_n_months > 24) args.last_n_months = 24;
-  if (args.headless == null) args.headless = true;
   if (args.username && args.password && args.url) {
     fs.writeFileSync(
       ".env",
       `USERNAME="${encodeBase64(args.username)}"\n` +
         `PASSWORD="${encodeBase64(args.password)}"\n` +
         `URL="${args.url}"\n` +
-        `LAST_N_MONTHS=${args.last_n_months || 24}\n` +
-        `HEADLESS=${args.headless}`
+        `LAST_N_MONTHS=${args.last_n_months || 24}`
     );
   }
 
@@ -33,7 +32,6 @@ function loadArgs() {
     password: decodeBase64(process.env.PASSWORD),
     url: process.env.URL,
     last_n_months: parseInt(process.env.LAST_N_MONTHS),
-    headless: process.env.HEADLESS === "true",
   };
   return parsed_args;
 }
@@ -60,12 +58,19 @@ function fileExists(fileName) {
   return fs.existsSync(filePath);
 }
 
+function fileExistsWithRegex(regex) {
+  const downloadDir = path.join(os.homedir(), "Downloads");
+  const files = fs.readdirSync(downloadDir); // Get all files in Downloads
+  const fileName = files.find((file) => regex.test(file)) || null; // Check if any file matches the regex
+  return fileName;
+}
+
 async function handleCookieConsent(page) {
   try {
     console.log("Waiting for cookie consent window");
     const rejectButton = await page.waitForSelector(
       "#onetrust-reject-all-handler",
-      { visible: true, timeout: 3000 }
+      { visible: true, timeout: 2000 }
     );
 
     if (rejectButton) {
@@ -86,11 +91,11 @@ async function loginAndRedirect(page, url) {
     // Go to Login Page
     console.log(`Initial navigation to ${url}`);
     await page.goto(url, { waitUntil: "networkidle2" });
-    await setTimeout(1000);
+    await setTimeout(2000);
 
     // Check if redirected to login page
     if (page.url().includes("login")) {
-      console.log("Redirected to login page, please check your credentials");
+      console.log("Redirected to login page");
       const loggedIn = await page.$(".pge_coc-header-siginedin_gp");
       if (loggedIn) {
         console.log("Already logged in");
@@ -105,6 +110,7 @@ async function loginAndRedirect(page, url) {
 
         await setTimeout(3000);
         await loginButton.click();
+        console.log("Clicked login button");
 
         // Wait for post-login navigation (PG&E may redirect or show a 2FA page, etc.)
         await page.waitForNavigation({ waitUntil: "networkidle2" });
@@ -113,16 +119,21 @@ async function loginAndRedirect(page, url) {
     // Navigate to the Billing History page
     console.log(`After handling login, navigating to ${url}`);
     await page.goto(url, { waitUntil: "networkidle2" });
-    // 6. Wait for the bill entries to load
+
+    console.log(`Current page: ${page.url()}`);
+    // Wait for the bill entries to load
     const view24MonthBillsButton = await page.waitForSelector(
       "#href-view-24month-history",
-      { visible: true, timeout: 3000 }
+      { visible: true, timeout: 6000 }
     );
-    // 7. Click on the "View up to 24 months of activity" link
+    // Click on the "View up to 24 months of activity" link
     await view24MonthBillsButton.click();
+    await page.waitForSelector(
+      "tbody.desktop-pdpore-table.account-list-tbody.scrollTable"
+    );
     return true;
   } catch (err) {
-    console.log("failed log in");
+    console.log("Failed to log in", err);
     return false;
   }
 }
@@ -135,7 +146,9 @@ async function loginAndRedirectWithRetry(page, url, n_retry) {
       return true;
     }
     console.log("Failed to log in, refreshing page and retrying...");
+    await setTimeout(1000);
     await page.reload({ waitUntil: "networkidle2" });
+    await setTimeout(8000);
   }
 
   console.log("Failed to log in after", n_retry, "retries");
@@ -155,7 +168,7 @@ async function clickAndDownloadBills(page, limit) {
         continue;
       }
 
-      console.log(`Processing row ${idx}\n`);
+      console.log(`Processing row ${idx}`);
       try {
         await row.evaluate((el) =>
           el.scrollIntoView({ behavior: "smooth", block: "start" })
@@ -201,11 +214,27 @@ async function clickAndDownloadBills(page, limit) {
   return fileNames;
 }
 
+function allBillsDownloaded() {
+  let fileNames = [];
+  for (let i = 0; i < ARGS.last_n_months; i++) {
+    let date = new Date();
+    date.setMonth(date.getMonth() - i);
+    const month = String(date.getUTCMonth() + 1).padStart(2, "0");
+    const year = date.getUTCFullYear();
+    const regex = new RegExp(`^6491custbill${month}\\d+${year}\\.pdf$`);
+    const fileName = fileExistsWithRegex(regex);
+    if (!fileName) {
+      return [];
+    }
+    fileNames.push(fileName);
+  }
+  return fileNames;
+}
+
 async function scrape() {
   // 1. Launch Browser
   const browser = await puppeteer.launch({
-    headless: ARGS.headless,
-    userDataDir: "./puppeteer_cache",
+    headless: false,
   });
   const page = await browser.newPage();
   await page.setUserAgent(
@@ -217,32 +246,35 @@ async function scrape() {
     return false;
   }
 
+  let fileNames = [];
   try {
-    // 8. Wait for the 24 month bills to load
-    await page.waitForSelector(
-      "tbody.desktop-pdpore-table.account-list-tbody.scrollTable"
-    );
-
     let limit = ARGS.last_n_months;
     console.log(`Getting the last ${limit} months of bills`);
-    const fileNames = await clickAndDownloadBills(page, limit);
-
+    fileNames = await clickAndDownloadBills(page, limit);
     console.log("Downloaded files:\n", fileNames);
   } catch (error) {
     console.error("Error scraping PG&E bills:", error);
-    return false;
+    return [];
   } finally {
     await browser.close();
-    return true;
+    return fileNames;
   }
 }
 
 async function main() {
-  const success = await scrape();
-  if (!success) {
-    console.log("Failed to scrape PG&E bills");
-    process.exit(1);
+  let fileNames = allBillsDownloaded();
+  if (fileNames.length === 0) {
+    console.log("Not all bill pdfs are downloaded, start scraping...");
+    fileNames = await scrape();
+  } else {
+    console.log("All bill pdfs are downloaded, start parsing...");
   }
+  if (fileNames.length === 0) {
+    console.log("Failed to scrape PG&E bills");
+    return;
+  }
+  await parsePgeBillingFiles(fileNames);
+  console.log("Parsed billings and saved to billings.csv\n");
 }
 
 main();
