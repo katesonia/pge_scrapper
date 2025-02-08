@@ -1,6 +1,7 @@
 const { createWorker } = require("tesseract.js");
 const path = require("path");
 const fs = require("fs").promises;
+const fssync = require("fs");
 const { exec } = require("child_process");
 const util = require("util");
 const execPromise = util.promisify(exec);
@@ -22,7 +23,6 @@ async function pdfToImage(pdfPath, outputPath, pageNumber = 1) {
     }
 
     console.log(`Converted page ${pageNumber} to image: ${outputPath}`);
-    return outputPath;
   } catch (err) {
     console.error("Error converting PDF to image: ", err);
     throw err;
@@ -84,12 +84,13 @@ async function loadFiles(fileNames) {
 
       try {
         // Convert the first page of the PDF to an image.
-        const imagePath = await pdfToImage(
-          filePath,
-          path.join(outputDir, fileName.replace(".pdf", ".png")),
-          (pageNumber = 1)
+        const imagePath = path.join(
+          outputDir,
+          fileName.replace(".pdf", ".png")
         );
-        // console.log(imagePath);
+        if (!fssync.existsSync(imagePath)) {
+          await pdfToImage(filePath, imagePath, (pageNumber = 1));
+        }
         // Perform OCR on the generated image.
         const extractedText = await doOCR(imagePath);
         const charges = extractCharges(extractedText);
