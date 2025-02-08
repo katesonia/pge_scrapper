@@ -75,10 +75,7 @@ async function loadFiles(fileNames) {
       // console.log(filePath);
       // Ensure the output directory exists.
       const outputDir = path.join(__dirname, "images");
-      try {
-        await fs.access(outputDir);
-      } catch (err) {
-        console.log(err);
+      if (!fssync.existsSync(outputDir)) {
         await fs.mkdir(outputDir);
       }
 
