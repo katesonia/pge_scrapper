@@ -13,6 +13,7 @@ puppeteer.use(StealthPlugin());
 
 const ARGS = loadArgs();
 const N_RETRY = 2;
+const COOKIES_PATH = "./cookies.json";
 
 function loadArgs() {
   const args = minimist(process.argv.slice(2));
@@ -85,13 +86,17 @@ async function handleCookieConsent(page) {
   }
 }
 
+function randomDelay(min, max) {
+  return Math.floor(Math.random() * (max - min + 1)) + min;
+}
+
 async function loginAndRedirect(page, url) {
   try {
     await handleCookieConsent(page);
     // Go to Login Page
     console.log(`Initial navigation to ${url}`);
     await page.goto(url, { waitUntil: "networkidle2" });
-    await setTimeout(2000);
+    await setTimeout(randomDelay(2000, 4000));
 
     // Check if redirected to login page
     if (page.url().includes("login")) {
@@ -108,7 +113,7 @@ async function loginAndRedirect(page, url) {
           visible: true,
         });
 
-        await setTimeout(3000);
+        await setTimeout(randomDelay(3000, 5000));
         await loginButton.click();
         console.log("Clicked login button");
 
@@ -124,8 +129,9 @@ async function loginAndRedirect(page, url) {
     // Wait for the bill entries to load
     const view24MonthBillsButton = await page.waitForSelector(
       "#href-view-24month-history",
-      { visible: true, timeout: 6000 }
+      { visible: true, timeout: randomDelay(8000, 10000) }
     );
+    await setTimeout(randomDelay(1000, 3000));
     // Click on the "View up to 24 months of activity" link
     await view24MonthBillsButton.click();
     await page.waitForSelector(
@@ -143,12 +149,13 @@ async function loginAndRedirectWithRetry(page, url, n_retry) {
     const loggedIn = await loginAndRedirect(page, url);
     if (loggedIn) {
       console.log("Successfully logged in");
+      await saveCookies(page);
       return true;
     }
     console.log("Failed to log in, refreshing page and retrying...");
-    await setTimeout(1000);
+    await setTimeout(randomDelay(1000, 3000));
     await page.reload({ waitUntil: "networkidle2" });
-    await setTimeout(8000);
+    await setTimeout(randomDelay(5000, 6000));
   }
 
   console.log("Failed to log in after", n_retry, "retries");
@@ -173,7 +180,7 @@ async function clickAndDownloadBills(page, limit) {
         await row.evaluate((el) =>
           el.scrollIntoView({ behavior: "smooth", block: "start" })
         );
-        await setTimeout(1000);
+        await setTimeout(randomDelay(1000, 3000));
 
         const viewBillLinks = await row.$$('a[title="view bill pdf"]', {
           visible: true,
@@ -196,7 +203,7 @@ async function clickAndDownloadBills(page, limit) {
             }
 
             await viewBillLink.click();
-            await setTimeout(8000); // Wait for PDF download or navigation
+            await setTimeout(randomDelay(5000, 6000)); // Wait for PDF download or navigation
             console.log("Bill Date:", billDate);
             console.log(`Clicked and successfully downloaded ${fileName}`);
             fileNames.push(fileName);
@@ -231,17 +238,44 @@ function allBillsDownloaded() {
   return fileNames;
 }
 
+async function saveCookies(page) {
+  console.log("Saving cookies to", COOKIES_PATH);
+  const cookies = await page.cookies();
+  fs.writeFileSync(COOKIES_PATH, JSON.stringify(cookies, null, 2));
+}
+
+async function loadCookies(page) {
+  if (!fs.existsSync(COOKIES_PATH)) {
+    console.log("No cookies found, skipping...");
+    return false;
+  }
+  console.log("Loading cookies from", COOKIES_PATH);
+  const cookies = JSON.parse(fs.readFileSync(COOKIES_PATH, "utf8"));
+  await page.setCookie(...cookies);
+  return true;
+}
+
 async function scrape() {
   // 1. Launch Browser
   const browser = await puppeteer.launch({
     headless: false,
   });
   const page = await browser.newPage();
+  const userAgents = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/113.0.0.0 Safari/537.36",
+  ];
   await page.setUserAgent(
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36"
+    userAgents[Math.floor(Math.random() * userAgents.length)]
   );
+  await page.setExtraHTTPHeaders({
+    "accept-language": "en-US,en;q=0.9",
+    "upgrade-insecure-requests": "1",
+  });
+  await loadCookies(page);
 
-  // login
+  //login
   if (!(await loginAndRedirectWithRetry(page, ARGS.url, N_RETRY))) {
     return false;
   }
@@ -278,3 +312,4 @@ async function main() {
 }
 
 main();
+// console.log(fs.existsSync(COOKIES_PATH));
