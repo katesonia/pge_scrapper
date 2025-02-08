@@ -45,18 +45,11 @@ function decodeBase64(str) {
   return Buffer.from(str, "base64").toString("utf8");
 }
 
-function getDownloadFileName(date) {
+function getDownloadFileNameRegex(date) {
   const mm = String(date.getUTCMonth() + 1).padStart(2, "0"); // Months are 0-based
-  const dd = String(date.getUTCDate()).padStart(2, "0");
   const yyyy = date.getUTCFullYear();
 
-  const formattedDate = `${mm}${dd}${yyyy}`;
-  return `6491custbill${formattedDate}.pdf`;
-}
-
-function fileExists(fileName) {
-  const filePath = path.join(os.homedir(), "Downloads", fileName);
-  return fs.existsSync(filePath);
+  return new RegExp(`^\\d+custbill${mm}\\d+${yyyy}\\.pdf$`);
 }
 
 function fileExistsWithRegex(regex) {
@@ -193,8 +186,9 @@ async function clickAndDownloadBills(page, limit) {
             );
             // Convert the millisecond timestamp into a Date object
             const billDate = new Date(parseInt(billTimestamp, 10));
-            const fileName = getDownloadFileName(billDate);
-            if (fileExists(fileName)) {
+            const fileNameRegex = getDownloadFileNameRegex(billDate);
+            let fileName = fileExistsWithRegex(fileNameRegex);
+            if (fileName) {
               console.log(
                 `File ${fileName} already exists, loading from local file, skip downloading...`
               );
@@ -206,6 +200,7 @@ async function clickAndDownloadBills(page, limit) {
             await setTimeout(randomDelay(5000, 6000)); // Wait for PDF download or navigation
             console.log("Bill Date:", billDate);
             console.log(`Clicked and successfully downloaded ${fileName}`);
+            fileName = fileExistsWithRegex(fileNameRegex);
             fileNames.push(fileName);
           } catch (err) {
             console.log(`Skip to the next clickable element: ${err}`);
@@ -226,9 +221,7 @@ function allBillsDownloaded() {
   for (let i = 0; i < ARGS.last_n_months; i++) {
     let date = new Date();
     date.setMonth(date.getMonth() - i);
-    const month = String(date.getUTCMonth() + 1).padStart(2, "0");
-    const year = date.getUTCFullYear();
-    const regex = new RegExp(`^6491custbill${month}\\d+${year}\\.pdf$`);
+    const regex = getDownloadFileNameRegex(date);
     const fileName = fileExistsWithRegex(regex);
     if (!fileName) {
       return [];
@@ -312,4 +305,3 @@ async function main() {
 }
 
 main();
-// console.log(fs.existsSync(COOKIES_PATH));
