@@ -4,8 +4,13 @@
 
 Download the repo:
 
+- Click the green button "Code" and copy the link
+- Download the zip file by clicking the "Download ZIP" button
+- Unzip the file and open the terminal in Downloads folder by double-clicking
+- Open the terminal and run:
+
 ```bash
-git clone https://github.com/zhaoyu-li/pge-bill-scrapper.git
+cd ~/Downloads/pge_scrapper-main
 ```
 
 If you haven't install node, run the following command to install it:
@@ -31,7 +36,7 @@ node scrapper.js --url <url_to_pge_billings> --username <your_username> --passwo
 Example:
 
 ```bash
-node scrapper.js --url https://m.pge.com/#myaccount/billing/history/1234 --username user1@gmail.com --password abc12345 --last_n_months 3
+node scrapper.js --url 'https://m.pge.com/#myaccount/billing/history/1234' --username 'user1@gmail.com' --password 'abc12345' --last_n_months 3
 ```
 
 Arguments:
