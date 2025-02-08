@@ -76,7 +76,8 @@ async function loadFiles(fileNames) {
       // Ensure the output directory exists.
       const outputDir = path.join(__dirname, "images");
       if (!fssync.existsSync(outputDir)) {
-        await fs.mkdir(outputDir);
+        console.log(`Creating output directory: ${outputDir}`);
+        await fssync.mkdir(outputDir);
       }
 
       try {
