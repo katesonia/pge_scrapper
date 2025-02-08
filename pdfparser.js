@@ -70,7 +70,7 @@ async function loadFiles(fileNames) {
   const outputDir = path.join(__dirname, "images");
   if (!fs.existsSync(outputDir)) {
     console.log(`Creating output directory: ${outputDir}`);
-    fs.mkdir(outputDir);
+    fs.mkdirSync(outputDir);
   }
   await Promise.all(
     fileNames.map(async (fileName) => {
