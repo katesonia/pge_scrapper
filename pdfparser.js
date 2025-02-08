@@ -1,7 +1,6 @@
 const { createWorker } = require("tesseract.js");
 const path = require("path");
-const fs = require("fs").promises;
-const fssync = require("fs");
+const fs = require("fs");
 const { exec } = require("child_process");
 const util = require("util");
 const execPromise = util.promisify(exec);
@@ -67,18 +66,16 @@ function extractCharges(ocrText) {
 
 async function loadFiles(fileNames) {
   let billings = {};
+  // Ensure the output directory exists.
+  const outputDir = path.join(__dirname, "images");
+  if (!fs.existsSync(outputDir)) {
+    console.log(`Creating output directory: ${outputDir}`);
+    fs.mkdir(outputDir);
+  }
   await Promise.all(
     fileNames.map(async (fileName) => {
       // Update this if your PDF file is located somewhere else.
       const filePath = path.join(process.env.HOME, "Downloads", fileName);
-
-      // console.log(filePath);
-      // Ensure the output directory exists.
-      const outputDir = path.join(__dirname, "images");
-      if (!fssync.existsSync(outputDir)) {
-        console.log(`Creating output directory: ${outputDir}`);
-        await fssync.mkdir(outputDir);
-      }
 
       try {
         // Convert the first page of the PDF to an image.
@@ -86,7 +83,7 @@ async function loadFiles(fileNames) {
           outputDir,
           fileName.replace(".pdf", ".png")
         );
-        if (!fssync.existsSync(imagePath)) {
+        if (!fs.existsSync(imagePath)) {
           await pdfToImage(filePath, imagePath, (pageNumber = 1));
         }
         // Perform OCR on the generated image.
@@ -154,7 +151,7 @@ function writeBillingsToCSV(data, filename) {
   });
 
   const csvContent = [headers.join(","), ...rows].join("\n");
-  fs.writeFile(filename, csvContent, "utf8");
+  fs.writeFileSync(filename, csvContent, "utf8");
 }
 
 module.exports = {
