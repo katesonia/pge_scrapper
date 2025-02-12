@@ -297,15 +297,12 @@ async function saveSession(page) {
         LOCAL_STORAGE_PATH,
         JSON.stringify(localStorageData, null, 2)
       );
-      console.log("Local storage saved.");
-    } else {
-      console.log("Local storage not available.");
     }
   } catch (err) {
     console.log("Error accessing local storage:", err.message);
   }
 
-  console.log("Session saved!");
+  console.log("Session saved!\n");
 }
 
 async function scrape() {
