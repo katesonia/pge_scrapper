@@ -145,7 +145,7 @@ function writeBillingsToCSV(data, filename) {
       details.date,
       details.pgeElectricDelivery,
       details.sanJoseCleanEnergy,
-      details.pgeElectricDelivery + details.sanJoseCleanEnergy,
+      (details.pgeElectricDelivery + details.sanJoseCleanEnergy).toFixed(2),
       details.gasCharges,
     ].join(",");
   });
