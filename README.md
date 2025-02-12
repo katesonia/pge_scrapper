@@ -42,7 +42,7 @@ node scrapper.js --url <url_to_pge_billings> --last_n_months <last_n_months_to_d
 Example:
 
 ```bash
-node scrapper.js --url 'https://m.pge.com/#myaccount/billing/history/1234' --last_n_months 3
+node scrapper.js --url https://m.pge.com/#myaccount/billing/history/1234 --last_n_months 3
 ```
 
 Arguments:
