@@ -14,35 +14,23 @@ puppeteer.use(StealthPlugin());
 const ARGS = loadArgs();
 const N_RETRY = 2;
 const COOKIES_PATH = "./cookies.json";
+const LOCAL_STORAGE_PATH = "./localstorage.json";
 
 function loadArgs() {
   const args = minimist(process.argv.slice(2));
   if (args.last_n_months > 24) args.last_n_months = 24;
-  if (args.username && args.password && args.url) {
+  if (args.url) {
     fs.writeFileSync(
       ".env",
-      `USERNAME="${encodeBase64(String(args.username))}"\n` +
-        `PASSWORD="${encodeBase64(String(args.password))}"\n` +
-        `URL="${args.url}"\n` +
-        `LAST_N_MONTHS=${args.last_n_months || 24}`
+      `URL="${args.url}"\nLAST_N_MONTHS=${args.last_n_months || 24}`
     );
   }
 
   const parsed_args = {
-    username: decodeBase64(process.env.USERNAME),
-    password: decodeBase64(process.env.PASSWORD),
     url: process.env.URL,
     last_n_months: parseInt(process.env.LAST_N_MONTHS),
   };
   return parsed_args;
-}
-
-function encodeBase64(str) {
-  return Buffer.from(str).toString("base64");
-}
-
-function decodeBase64(str) {
-  return Buffer.from(str, "base64").toString("utf8");
 }
 
 function getDownloadFileNameRegex(date) {
@@ -98,27 +86,46 @@ async function loginAndRedirect(page, url) {
       if (loggedIn) {
         console.log("Already logged in");
       } else {
-        console.log("Filling in username and password");
-        // Fill in username and password
-        await page.type("#usernameField", ARGS.username);
-        await page.type("#passwordField", ARGS.password);
-        const loginButton = await page.waitForSelector("#home_login_submit", {
+        console.log(
+          "\n***Pls manually fill in username and password in 5 mins***\n"
+        );
+        await page.waitForSelector("#home_login_submit", {
           visible: true,
         });
+        await page.evaluate(() => {
+          window.loginTriggered = false;
 
-        await setTimeout(randomDelay(3000, 5000));
-        await loginButton.click();
-        console.log("Clicked login button");
+          // Listen for login button click
+          document
+            .querySelector("#home_login_submit")
+            ?.addEventListener("click", () => {
+              window.loginTriggered = true;
+            });
+
+          // Listen for Enter key in the password field
+          document
+            .querySelector("#passwordField")
+            ?.addEventListener("keypress", (event) => {
+              if (event.key === "Enter") {
+                window.loginTriggered = true;
+              }
+            });
+        });
+
+        await page.waitForFunction(() => window.loginTriggered, {
+          timeout: 300000,
+        });
 
         // Wait for post-login navigation (PG&E may redirect or show a 2FA page, etc.)
         await page.waitForNavigation({ waitUntil: "networkidle2" });
+        // Navigate to the Billing History page
+        console.log(`After handling login, navigating to ${url} again...`);
+        await page.goto(url, { waitUntil: "networkidle2" });
       }
+    } else {
+      console.log("Successfully goes to the billing history page");
     }
-    // Navigate to the Billing History page
-    console.log(`After handling login, navigating to ${url}`);
-    await page.goto(url, { waitUntil: "networkidle2" });
 
-    console.log(`Current page: ${page.url()}`);
     // Wait for the bill entries to load
     const view24MonthBillsButton = await page.waitForSelector(
       "#href-view-24month-history",
@@ -142,7 +149,7 @@ async function loginAndRedirectWithRetry(page, url, n_retry) {
     const loggedIn = await loginAndRedirect(page, url);
     if (loggedIn) {
       console.log("Successfully logged in");
-      await saveCookies(page);
+      await saveSession(page);
       return true;
     }
     console.log("Failed to log in, refreshing page and retrying...");
@@ -231,21 +238,74 @@ function allBillsDownloaded() {
   return fileNames;
 }
 
-async function saveCookies(page) {
-  console.log("Saving cookies to", COOKIES_PATH);
-  const cookies = await page.cookies();
-  fs.writeFileSync(COOKIES_PATH, JSON.stringify(cookies, null, 2));
+async function loadSession(page) {
+  if (fs.existsSync(COOKIES_PATH)) {
+    console.log("Loading session cookies...");
+    const cookies = JSON.parse(fs.readFileSync(COOKIES_PATH, "utf8"));
+    await page.setCookie(...cookies);
+  } else {
+    console.log("No saved cookies found.");
+  }
+
+  if (fs.existsSync(LOCAL_STORAGE_PATH)) {
+    console.log("Loading session local storage...");
+    const localStorageData = JSON.parse(
+      fs.readFileSync(LOCAL_STORAGE_PATH, "utf8")
+    );
+
+    try {
+      await page.evaluate((data) => {
+        if (!window.localStorage) {
+          console.log("Local storage is not accessible.");
+          return;
+        }
+        for (let key in data) {
+          localStorage.setItem(key, data[key]);
+        }
+      }, localStorageData);
+      console.log("Local storage loaded.");
+    } catch (err) {
+      console.log("Error loading local storage:", err.message);
+    }
+  } else {
+    console.log("No saved local storage found.");
+  }
 }
 
-async function loadCookies(page) {
-  if (!fs.existsSync(COOKIES_PATH)) {
-    console.log("No cookies found, skipping...");
-    return false;
+async function saveSession(page) {
+  console.log("Saving session...");
+
+  // Save cookies
+  const cookies = await page.cookies();
+  fs.writeFileSync(COOKIES_PATH, JSON.stringify(cookies, null, 2));
+
+  // Try to access local storage safely
+  try {
+    const localStorageData = await page.evaluate(() => {
+      if (!window.localStorage) {
+        return null;
+      }
+      let data = {};
+      for (let key in localStorage) {
+        data[key] = localStorage.getItem(key);
+      }
+      return data;
+    });
+
+    if (localStorageData) {
+      fs.writeFileSync(
+        LOCAL_STORAGE_PATH,
+        JSON.stringify(localStorageData, null, 2)
+      );
+      console.log("Local storage saved.");
+    } else {
+      console.log("Local storage not available.");
+    }
+  } catch (err) {
+    console.log("Error accessing local storage:", err.message);
   }
-  console.log("Loading cookies from", COOKIES_PATH);
-  const cookies = JSON.parse(fs.readFileSync(COOKIES_PATH, "utf8"));
-  await page.setCookie(...cookies);
-  return true;
+
+  console.log("Session saved!");
 }
 
 async function scrape() {
@@ -266,7 +326,7 @@ async function scrape() {
     "accept-language": "en-US,en;q=0.9",
     "upgrade-insecure-requests": "1",
   });
-  await loadCookies(page);
+  await loadSession(page);
 
   //login
   if (!(await loginAndRedirectWithRetry(page, ARGS.url, N_RETRY))) {

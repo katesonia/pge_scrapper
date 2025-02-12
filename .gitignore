@@ -5,6 +5,7 @@ puppeteer_cache/
 billings.csv
 eng.traineddata
 cookies.json
+localstorage.json
 *.pdf
 *.png
 *.jpg
